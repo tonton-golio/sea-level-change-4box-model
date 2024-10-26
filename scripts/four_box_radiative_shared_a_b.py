@@ -60,7 +60,7 @@ class SeaLevelModel:
         self.SL_unc = self.SL_unc[SL_obs_indices][SL_obs_order]
         self.years_obs = self.years_obs[SL_obs_indices][SL_obs_order]
 
-    def get_S(self, F, S_0, tau1, a1, b1, tau2, a2, b2, S_eq_func=None):
+    def get_S(self, F, S_0, a, b, tau1, tau2, tau3, tau4, S_eq_func=None):
         """
         Compute the sea level S based on the forcing F and model parameters.
 
@@ -75,17 +75,19 @@ class SeaLevelModel:
         - S: array-like, modeled sea level.
         """
         if S_eq_func is None:
-            S_eq1 = a1*100 * F + b1*1000
-            S_eq2 = a2*100 * F + b2*1000
+            S_eq = a*100 * F + b*1000
+            
         else:
-            S_eq = S_eq_func(F, a2, b2)
+            S_eq = S_eq_func(F, a, b)
 
         S = np.zeros(len(F))
         S[0] = S_0
         for i in range(1, len(F)):
-            ds1 = (S_eq1[i-1] - S[i-1]) / tau1
-            ds2 = (S_eq2[i-1] - S[i-1]) / tau2
-            S[i] = S[i-1] + ds1 + ds2
+            ds1 = (S_eq[i-1] - S[i-1]) / tau1 /4
+            ds2 = (S_eq[i-1] - S[i-1]) / tau2 /4
+            ds3 = (S_eq[i-1] - S[i-1]) / tau3 /4
+            ds4 = (S_eq[i-1] - S[i-1]) / tau4 /4
+            S[i] = S[i-1] + ds1 + ds2 + ds3 + ds4
         
         return S
 
@@ -120,15 +122,15 @@ class SeaLevelModel:
         - pcov: 2D array, covariance of the optimized parameters.
         """
         # Wrapper function for curve_fit
-        def model_func(F_obs, S_0, tau1, a1, b1, tau2, a2, b2):
+        def model_func(F_obs, S_0, a, b, tau1, tau2, tau3, tau4):
             # Compute modeled sea level over full time series
-            S_model_full = self.get_S(self.F_full, S_0, tau1, a1, b1, tau2, a2, b2, S_eq_func)
+            S_model_full = self.get_S(self.F_full, S_0, a, b, tau1, tau2, tau3, tau4, S_eq_func)
             # Extract modeled sea level at observation years
             S_model_obs = np.interp(self.years_obs, self.years_full, S_model_full)
             return S_model_obs
         
         # Initial guess for the parameters
-        initial_guess = [-0.2, 40, 5, 2, 40, 5, 2]
+        initial_guess = [-500, 2, 5, 5, 10, 20, 50]
         
         # Perform curve fitting
         popt, pcov = curve_fit(
@@ -147,20 +149,21 @@ class SeaLevelModel:
         Returns:
         - lp: float, log prior probability.
         """
-        S_0, tau1, a1, b1, tau2, a2, b2 = theta
+        S_0, a, b, tau1, tau2, tau3, tau4 = theta
         # Example of normal priors
         lp = 0
         lp += -0.5 * ((S_0 + 800)/100)**2  # Mean at -0.1, sigma=0.5
-        lp += -0.5 * ((tau1 - 350)/100)**2  # Mean at 350, sigma=200
-        lp += -0.5 * ((a1 - 5)/3)**2      # Mean at 5, sigma=3
-        lp += -0.5 * ((b1 - 5)/3)**2       # Mean at 5, sigma=3
-        lp += -0.5 * ((tau2 - 350)/100)**2  # Mean at 350, sigma=200
-        lp += -0.5 * ((a2 - 5)/3)**2      # Mean at 5, sigma=3
-        lp += -0.5 * ((b2 - 5)/3)**2       # Mean at 5, sigma=3
+        lp += -0.5 * ((a - 2)/3)**2      # Mean at 5, sigma=3
+        lp += -0.5 * ((b - 2)/3)**2       # Mean at 5, sigma=3
+        lp += -0.5 * ((tau1 - 50)/100)**2  # Mean at 350, sigma=200
+        lp += -0.5 * ((tau2 - 50)/100)**2  # Mean at 350, sigma=200
+        lp += -0.5 * ((tau3 - 100)/100)**2  # Mean at 350, sigma=200
+        lp += -0.5 * ((tau4 - 350)/100)**2  # Mean at 350, sigma=200
 
         # Check if parameters are within bounds
         # if -2 < S_0 < 0 and 1 < tau2 < 700 and -2 < a2 < 90 and -1 < b2 < 20:
-        if -2000 < S_0 < 2000 and 0 < tau2 < 1000 and -100 < a2 < 100 and -100 < b2 < 100 and 0 < tau1 < 1000 and -100 < a1 < 100 and -100 < b1 < 100:
+        # if -2000 < S_0 < 2000 and 0 < tau2 < 1000 and -100 < a2 < 100 and -100 < b2 < 100 and 0 < tau1 < 1000 and -100 < a1 < 100 and -100 < b1 < 100:
+        if -1000 < S_0 < 1000 and -10 < a < 10 and -10 < b < 10 and 0 < tau1 < 1000 and 0 < tau2 < 1000 and 0 < tau3 < 1000 and 0 < tau4 < 1000:
             return lp
         return -np.inf
 
@@ -175,9 +178,9 @@ class SeaLevelModel:
         Returns:
         - ll: float, log likelihood.
         """
-        S_0, tau1, a1, b1, tau2, a2, b2 = theta
+        S_0, a, b, tau1, tau2, tau3, tau4 = theta
         # Compute modeled sea level over full time series
-        S_model_full = self.get_S(self.F_full, S_0, tau1, a1, b1, tau2, a2, b2, S_eq_func)
+        S_model_full = self.get_S(self.F_full, S_0, a, b, tau1, tau2, tau3, tau4, S_eq_func)
         # Interpolate modeled sea level at observation years
         S_model_obs = np.interp(self.years_obs, self.years_full, S_model_full)
         residuals = self.SL_obs - S_model_obs
@@ -326,11 +329,11 @@ if __name__ == '__main__':
     print(f"AIC: {aic}, BIC: {bic}")
 
     # Run MCMC sampling
-    initial_guess = [-800, 600, 5, .2, 600, 5, .2]
+    initial_guess = [-500, 2, 5, 50, 100, 200, 500]
     sampler, samples = model.run_mcmc(initial_guess, nwalkers=50, nsteps=1000)
 
     # Plot the corner plot of the posterior distributions
-    corner.corner(samples, labels=["S_0", "tau1", "a1", "b1", "tau2", "a2", "b2"], truths=popt)
+    corner.corner(samples, labels=["S_0", "a", "b", "tau1", "tau2", "tau3", "tau4"], truths=popt)
     plt.show()
 
     # Compute the median of the samples to get the best-fit parameters
@@ -345,7 +348,7 @@ if __name__ == '__main__':
 
     # pretty print the results
     print("MCMC Results:")
-    for i, param in enumerate(["S_0", "tau1", "a1", "b1", "tau2", "a2", "b2"]):
+    for i, param in enumerate(["S_0", "a", "b", "tau1", "tau2", "tau3", "tau4"]):
         mcmc = np.percentile(samples[:, i], [16, 50, 84])
         q = np.diff(mcmc)
         txt = f"{param} = {mcmc[1]:.2f} + {q[1]:.2f} - {q[0]:.2f}"
