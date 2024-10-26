@@ -100,8 +100,9 @@ class SeaLevelModel:
         ax1.set_xlabel('Year')
         
         # Plot sea level observations with error bars
-        ax2.errorbar(self.years_obs, self.SL_obs, yerr=self.SL_unc,
-                     fmt='o', color='black', label='Sea Level Observations')
+        # ax2.errorbar(self.years_obs, self.SL_obs, yerr=self.SL_unc,
+        #              fmt='.', color='black', label='Sea Level Observations')
+        ax2.fill_between(self.years_obs, self.SL_obs - self.SL_unc, self.SL_obs + self.SL_unc, color='black', alpha=0.3)
         ax2.set_ylabel('Sea Level Anomaly (mm)', color='black')
         
         fig.suptitle('Radiative Forcing and Sea Level Rise')
@@ -243,8 +244,9 @@ class SeaLevelModel:
         # Plot modeled sea level over full time range
         plt.plot(self.years_full, S_model_full, label='Modeled Sea Level', color='red')
         # Plot observed sea level data
-        plt.errorbar(self.years_obs, self.SL_obs, yerr=self.SL_unc,
-                     fmt='o', label='Observed Sea Level', color='black')
+        # plt.errorbar(self.years_obs, self.SL_obs, yerr=self.SL_unc,
+        #              fmt='o', label='Observed Sea Level', color='black')
+        plt.fill_between(self.years_obs, self.SL_obs - self.SL_unc, self.SL_obs + self.SL_unc, color='black', alpha=0.3)
         plt.xlabel('Year')
         plt.ylabel('Sea Level Anomaly (mm)')
         plt.title('Sea Level Model vs Observations')
@@ -266,8 +268,9 @@ class SeaLevelModel:
 
         plt.figure(figsize=(12, 6))
         # Plot observed sea level data
-        plt.errorbar(self.years_obs, self.SL_obs , yerr=self.SL_unc,
-                     fmt='o', label='Observed Sea Level', color='black')
+        # plt.errorbar(self.years_obs, self.SL_obs , yerr=self.SL_unc,
+        #              fmt='o', label='Observed Sea Level', color='black')
+        plt.fill_between(self.years_obs, self.SL_obs - self.SL_unc, self.SL_obs + self.SL_unc, color='black', alpha=0.3)
         # Plot median modeled sea level
         plt.plot(self.years_full, perc[1], label='Median Modeled Sea Level', color='red')
         # Plot confidence interval
