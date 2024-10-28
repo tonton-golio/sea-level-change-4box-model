@@ -329,12 +329,12 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
 
         # Mass change (positive mass loss contributes to sea level rise)
         mass_change = (L + D + B) - P
-        S_forcing = mass_change/area_ocean  # Cumulative sum over time
+        S_forcing = mass_change/area_ocean
 
         S = np.zeros_like(F)
         S[0] = S_0
         for i in range(1, len(F)):
-            S[i] = (S[i-1] + S_forcing[i])/tau
+            S[i] = (S_forcing[i] -S[i-1])/tau
 
         return S
 
@@ -369,7 +369,7 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
         S = np.zeros_like(F)
         S[0] = S_0
         for i in range(1, len(F)):
-            S[i] = (S[i-1] + S_forcing[i])/tau
+            S[i] = (S_forcing[i] -S[i-1])/tau
 
         return S
 
@@ -393,7 +393,7 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
         S = np.zeros_like(F)
         S[0] = S_0
         for i in range(1, len(F)):
-            S[i] = (S[i-1] + S_forcing[i])/tau
+            S[i] = (S_forcing[i] - S[i-1])/tau
 
         return S
 
@@ -410,8 +410,8 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
         S = np.zeros_like(F)
         S[0] = S_0
         for i in range(1, len(F)):
-            S[i] = (S[i-1] + S_thermal[i])/(min(tau, 1))
-
+            # S[i] = (S[i-1] + S_thermal[i])/(min(tau, 1))
+            S[i] = (S_thermal[i] -S[i-1])/(tau+1)
         return S
 
     def log_prior(self, theta):
@@ -504,6 +504,32 @@ constants = {
     }
 }
 
+constants = {
+    'greenland': {
+        'area': 100,  # m^2
+        'length_boundary': 1,  # m
+        'height_avg': .01,  # m
+        'volume_overhang': 1,  # m^3
+        'area_ocean': 10  # m^2
+    },
+    'antarctica': {
+        'area': 1000,  # m^2
+        'length_boundary': 1,  # m
+        'height_avg': .01,  # m
+        'volume_overhang': 1,  # m^3
+        'area_ocean': 10  # m^2
+    },
+    'glacier': {
+        'area_glaciers': 10,  # m^2
+        'melt_factor': .01,  # Adjust as needed
+        'area_ocean': 10  # m^2
+    },
+    'thermal': {
+        'alpha': .1,  # 1/K
+        'depth_ocean': 10  # m
+    }
+}
+
 
 if __name__ == '__main__':
     # Climate sensitivity parameter
@@ -520,8 +546,12 @@ if __name__ == '__main__':
     initial_guess = model.initial_guess()
 
     # Fit the model using curve_fit
-    popt, pcov = model.curve_fit_model()
-    print('Optimized parameters from curve_fit:', popt)
+    try:
+        popt, pcov = model.curve_fit_model()
+        print('Optimized parameters from curve_fit:', popt)
+    except:
+        print('Optimization failed. Using initial guess instead.')
+        popt = initial_guess
 
     # Plot the model prediction with optimized parameters
     model.plot_model(popt)
