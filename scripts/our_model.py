@@ -250,12 +250,14 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
         z_antarctica = theta[4:8]  # (z1, z2, z3, z4)
         z_glacier = theta[8]
         # z_thermal = theta[9]  # If thermal expansion has a scaling parameter
+        S_0 = theta[9]  # Initial sea level
+        tau1, tau2, tau3, tau4 = theta[10:14]  # Time constants for each component
 
         # Compute contributions
-        S_greenland = self.greenland_contribution(F, self.constants['greenland'], z_greenland)
-        S_antarctica = self.antarctica_contribution(F, self.constants['antarctica'], z_antarctica)
-        S_glacier = self.glacier_contribution(F, self.constants['glacier'], z_glacier)
-        S_thermal = self.thermal_expansion(F, self.constants['thermal'])  # If scaling, multiply by z_thermal
+        S_greenland = self.greenland_contribution(F, S_0, tau1, self.constants['greenland'], z_greenland)
+        S_antarctica = self.antarctica_contribution(F, S_0, tau2, self.constants['antarctica'], z_antarctica)
+        S_glacier = self.glacier_contribution(F, S_0, tau3, self.constants['glacier'], z_glacier)
+        S_thermal = self.thermal_expansion(F, S_0, tau4, self.constants['thermal'])  # If scaling, multiply by z_thermal
 
         # Total sea level rise
         S_total = S_greenland + S_antarctica + S_glacier + S_thermal
@@ -272,17 +274,17 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
         Compute precipitation rate based on temperature change.
         """
         # Water carrying capacity of air (Clausius-Clapeyron relation approximation)
-        C = 6.112 * np.exp(17.67 * delta_T / (delta_T + 243.5))
+        C = 6.6106 * np.exp(0.0499 * delta_T)
         precipitation_rate = area * C * z
         return precipitation_rate
 
-    def melt(self, length_boundary, height_avg, delta_T, T_c, z):
+    def melt(self, length_boundary, height_avg, delta_T, z):
         """
         Compute melt rate based on temperature change.
         """
         # Area of boundary
         area = length_boundary * height_avg
-        melt_rate = area * np.maximum(delta_T - T_c, 0) * z
+        melt_rate = area * 0.01*np.exp(np.maximum(delta_T, 0)) * z
         return melt_rate
 
     def discharge(self, volume_overhang, delta_T_ocean, T_c, z):
@@ -299,7 +301,7 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
         sublimation_rate = area * F * delta_T * z
         return sublimation_rate
 
-    def greenland_contribution(self, F, constants, z_values):
+    def greenland_contribution(self, F, S_0, tau, constants, z_values):
         """
         Compute Greenland's sea level contribution over time.
         """
@@ -320,21 +322,22 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
 
         # Compute each term vectorized
         P = self.precipitation(area, delta_T_air, z1)
-        L = self.melt(length_boundary, height_avg, delta_T_air, T_c, z2)
+        L = self.melt(length_boundary, height_avg, delta_T_air, z2)
         D = self.discharge(volume_overhang, delta_T_ocean, T_c, z3)
         B = self.sublimation(area, F, delta_T_air, z4)
 
         # Mass change (positive mass loss contributes to sea level rise)
         mass_change = (L + D + B) - P
+        S_forcing = np.cumsum(mass_change/area_ocean)  # Cumulative sum over time
 
-        # Sea level change
-        dS = mass_change / area_ocean
+        S = np.zeros_like(F)
+        S[0] = S_0
+        for i in range(1, len(F)):
+            S[i] = (S[i-1] + S_forcing[i])/tau
 
-        # Cumulative sea level rise
-        S_greenland = np.cumsum(dS)
-        return S_greenland
+        return S
 
-    def antarctica_contribution(self, F, constants, z_values):
+    def antarctica_contribution(self, F, S_0, tau, constants, z_values):
         """
         Compute Antarctica's sea level contribution over time.
         """
@@ -355,21 +358,22 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
 
         # Compute each term vectorized
         P = self.precipitation(area, delta_T_air, z1)
-        L = self.melt(length_boundary, height_avg, delta_T_air, T_c, z2)
+        L = self.melt(length_boundary, height_avg, delta_T_air, z2)
         D = self.discharge(volume_overhang, delta_T_ocean, T_c, z3)
         B = self.sublimation(area, F, delta_T_air, z4)
 
         # Mass change
         mass_change = (L + D + B) - P
+        S_forcing = np.cumsum(mass_change/area_ocean)  # Cumulative sum over time
 
-        # Sea level change
-        dS = mass_change / area_ocean
+        S = np.zeros_like(F)
+        S[0] = S_0
+        for i in range(1, len(F)):
+            S[i] = (S[i-1] + S_forcing[i])/tau
 
-        # Cumulative sea level rise
-        S_antarctica = np.cumsum(dS)
-        return S_antarctica
+        return S
 
-    def glacier_contribution(self, F, constants, z):
+    def glacier_contribution(self, F, S_0, tau, constants, z):
         """
         Compute glacier contribution to sea level rise.
         """
@@ -383,15 +387,18 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
 
         # Simplified melt rate
         melt_rate = area_glaciers * delta_T_glacier * melt_factor * z
+        mass_change = -melt_rate
 
-        # Sea level change
-        dS = melt_rate / area_ocean
+        S_forcing = np.cumsum(mass_change/area_ocean)  # Cumulative sum over time
 
-        # Cumulative sea level rise
-        S_glacier = np.cumsum(dS)
-        return S_glacier
+        S = np.zeros_like(F)
+        S[0] = S_0
+        for i in range(1, len(F)):
+            S[i] = (S[i-1] + S_forcing[i])/tau
 
-    def thermal_expansion(self, F, constants):
+        return S
+
+    def thermal_expansion(self, F, S_0, tau, constants):
         """
         Compute thermal expansion contribution to sea level rise.
         """
@@ -400,7 +407,13 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
 
         # Sea level rise due to thermal expansion
         S_thermal = constants['alpha'] * constants['depth_ocean'] * delta_T_ocean
-        return S_thermal
+        
+        S = np.zeros_like(F)
+        S[0] = S_0
+        for i in range(1, len(F)):
+            S[i] = (S[i-1] + S_thermal[i])/tau
+
+        return S
 
     def log_prior(self, theta):
         """
@@ -416,7 +429,7 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
         """
         Generate an initial guess for the model parameters.
         """
-        return [1.0] * 9  # 9 scaling parameters
+        return [1.0] * 14  # 14 scaling parameters
 
     def parameter_labels(self):
         """
@@ -425,7 +438,7 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
         labels = [
             'z1_Greenland', 'z2_Greenland', 'z3_Greenland', 'z4_Greenland',
             'z1_Antarctica', 'z2_Antarctica', 'z3_Antarctica', 'z4_Antarctica',
-            'z_Glacier'
+            'z_Glacier', 'S_0', 'tau1', 'tau2', 'tau3', 'tau4'
         ]
         return labels
 
@@ -485,44 +498,46 @@ constants = {
     }
 }
 
-# Climate sensitivity parameter
-lambda_temp = 0.8  # K per W/m^2
 
-# Paths to your data files
-df_F_path = '../data/forcing_all.csv'
-df_S_path = '../data/processed_sea_level_data.csv'
+if __name__ == '__main__':
+    # Climate sensitivity parameter
+    lambda_temp = 0.8  # K per W/m^2
 
-# Instantiate the model
-model = ComplexSeaLevelModel(df_F_path, df_S_path, constants, lambda_temp)
+    # Paths to your data files
+    df_F_path = '../data/forcing_all.csv'
+    df_S_path = '../data/processed_sea_level_data.csv'
 
-# Initial guess for the parameters
-initial_guess = model.initial_guess()
+    # Instantiate the model
+    model = ComplexSeaLevelModel(df_F_path, df_S_path, constants, lambda_temp)
 
-# Fit the model using curve_fit
-popt, pcov = model.curve_fit_model()
-print('Optimized parameters from curve_fit:', popt)
+    # Initial guess for the parameters
+    initial_guess = model.initial_guess()
 
-# Plot the model prediction with optimized parameters
-model.plot_model(popt)
+    # Fit the model using curve_fit
+    popt, pcov = model.curve_fit_model()
+    print('Optimized parameters from curve_fit:', popt)
 
-# Compute AIC and BIC
-aic, bic = model.compute_aic_bic(popt)
-print(f"AIC: {aic}, BIC: {bic}")
+    # Plot the model prediction with optimized parameters
+    model.plot_model(popt)
 
-# Run MCMC sampling
-sampler, samples = model.run_mcmc(popt, nwalkers=50, nsteps=10000)
+    # Compute AIC and BIC
+    aic, bic = model.compute_aic_bic(popt)
+    print(f"AIC: {aic}, BIC: {bic}")
 
-# Plot the corner plot of the posterior distributions
-labels = model.parameter_labels()
-corner.corner(samples, labels=labels, truths=popt)
-plt.show()
+    # Run MCMC sampling
+    sampler, samples = model.run_mcmc(popt, nwalkers=50, nsteps=10000)
 
-# Compute the median of the samples to get the best-fit parameters
-theta_mcmc = np.median(samples, axis=0)
-print('Optimized parameters from MCMC:', theta_mcmc)
+    # Plot the corner plot of the posterior distributions
+    labels = model.parameter_labels()
+    corner.corner(samples, labels=labels, truths=popt)
+    plt.show()
 
-# Plot the model prediction with MCMC parameters
-model.plot_model(theta_mcmc)
+    # Compute the median of the samples to get the best-fit parameters
+    theta_mcmc = np.median(samples, axis=0)
+    print('Optimized parameters from MCMC:', theta_mcmc)
 
-# Plot model with confidence intervals
-model.plot_model_with_ci(samples)
+    # Plot the model prediction with MCMC parameters
+    model.plot_model(theta_mcmc)
+
+    # Plot model with confidence intervals
+    model.plot_model_with_ci(samples)
