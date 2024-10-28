@@ -199,8 +199,10 @@ class BaseSeaLevelModel:
         # Plot modeled sea level over full time range
         plt.plot(self.years_full, S_model_full, label='Modeled Sea Level', color='red')
         # Plot observed sea level data
-        plt.errorbar(self.years_obs, self.SL_obs, yerr=self.SL_unc,
-                     fmt='o', label='Observed Sea Level', color='black')
+        # plt.errorbar(self.years_obs, self.SL_obs, yerr=self.SL_unc,
+        #              fmt='o', label='Observed Sea Level', color='black')
+        plt.fill_between(self.years_obs, self.SL_obs - self.SL_unc, self.SL_obs + self.SL_unc,
+                            color='black', alpha=0.3, label='Observed Sea Level')
         plt.xlabel('Year')
         plt.ylabel('Sea Level Anomaly (mm)')
         plt.title('Sea Level Model vs Observations')
@@ -284,14 +286,14 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
         """
         # Area of boundary
         area = length_boundary * height_avg
-        melt_rate = area * 0.01*np.exp(np.maximum(delta_T, 0)) * z
+        melt_rate = area * 0.001*np.exp(np.maximum(delta_T, 0)) * z
         return melt_rate
 
-    def discharge(self, volume_overhang, delta_T_ocean, T_c, z):
+    def discharge(self, volume_overhang, delta_T_ocean, z):
         """
         Compute discharge rate based on ocean temperature change.
         """
-        discharge_rate = volume_overhang * np.maximum(delta_T_ocean - T_c, 0) * z
+        discharge_rate = volume_overhang * np.maximum(delta_T_ocean, 0) * z
         return discharge_rate
 
     def sublimation(self, area, F, delta_T, z):
@@ -310,7 +312,6 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
         length_boundary = constants['length_boundary']
         height_avg = constants['height_avg']
         volume_overhang = constants['volume_overhang']
-        T_c = constants['T_c']
         area_ocean = constants['area_ocean']
 
         # Unpack z_values
@@ -323,12 +324,12 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
         # Compute each term vectorized
         P = self.precipitation(area, delta_T_air, z1)
         L = self.melt(length_boundary, height_avg, delta_T_air, z2)
-        D = self.discharge(volume_overhang, delta_T_ocean, T_c, z3)
+        D = self.discharge(volume_overhang, delta_T_ocean, z3)
         B = self.sublimation(area, F, delta_T_air, z4)
 
         # Mass change (positive mass loss contributes to sea level rise)
         mass_change = (L + D + B) - P
-        S_forcing = np.cumsum(mass_change/area_ocean)  # Cumulative sum over time
+        S_forcing = mass_change/area_ocean  # Cumulative sum over time
 
         S = np.zeros_like(F)
         S[0] = S_0
@@ -346,7 +347,6 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
         length_boundary = constants['length_boundary']
         height_avg = constants['height_avg']
         volume_overhang = constants['volume_overhang']
-        T_c = constants['T_c']
         area_ocean = constants['area_ocean']
 
         # Unpack z_values
@@ -359,12 +359,12 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
         # Compute each term vectorized
         P = self.precipitation(area, delta_T_air, z1)
         L = self.melt(length_boundary, height_avg, delta_T_air, z2)
-        D = self.discharge(volume_overhang, delta_T_ocean, T_c, z3)
+        D = self.discharge(volume_overhang, delta_T_ocean, z3)
         B = self.sublimation(area, F, delta_T_air, z4)
 
         # Mass change
         mass_change = (L + D + B) - P
-        S_forcing = np.cumsum(mass_change/area_ocean)  # Cumulative sum over time
+        S_forcing = mass_change/area_ocean  # Cumulative sum over time
 
         S = np.zeros_like(F)
         S[0] = S_0
@@ -387,9 +387,8 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
 
         # Simplified melt rate
         melt_rate = area_glaciers * delta_T_glacier * melt_factor * z
-        mass_change = -melt_rate
 
-        S_forcing = np.cumsum(mass_change/area_ocean)  # Cumulative sum over time
+        S_forcing = melt_rate/area_ocean  # Cumulative sum over time
 
         S = np.zeros_like(F)
         S[0] = S_0
@@ -411,7 +410,7 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
         S = np.zeros_like(F)
         S[0] = S_0
         for i in range(1, len(F)):
-            S[i] = (S[i-1] + S_thermal[i])/tau
+            S[i] = (S[i-1] + S_thermal[i])/(min(tau, 1))
 
         return S
 
@@ -429,7 +428,14 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
         """
         Generate an initial guess for the model parameters.
         """
-        return [1.0] * 14  # 14 scaling parameters
+        # return [1.0] * 14  # 14 scaling parameters
+        return [
+            1.0, 1.0, 1.0, 1.0,  # z_Greenland
+            1.0, 1.0, 1.0, 1.0,  # z_Antarctica
+            1.0,  # z_Glacier
+            -50.0,  # S_0
+            10.0, 20.0, 50.0, 100.0  # tau1, tau2, tau3, tau4
+        ]
 
     def parameter_labels(self):
         """
@@ -456,8 +462,10 @@ class ComplexSeaLevelModel(BaseSeaLevelModel):
 
         plt.figure(figsize=(12, 6))
         # Plot observed sea level data
-        plt.errorbar(self.years_obs, self.SL_obs, yerr=self.SL_unc,
-                     fmt='o', label='Observed Sea Level', color='black')
+        # plt.errorbar(self.years_obs, self.SL_obs, yerr=self.SL_unc,
+        #              fmt='o', label='Observed Sea Level', color='black')
+        plt.fill_between(self.years_obs, self.SL_obs - self.SL_unc, self.SL_obs + self.SL_unc,
+                            color='black', alpha=0.3, label='Observed Sea Level')
         # Plot median modeled sea level
         plt.plot(self.years_full, perc[1], label='Median Modeled Sea Level', color='red')
         # Plot confidence interval
@@ -476,7 +484,6 @@ constants = {
         'length_boundary': 1.88e6,  # m
         'height_avg': 1500,  # m
         'volume_overhang': 2.9e15,  # m^3
-        'T_c': -1.0,  # °C
         'area_ocean': 3.6e14  # m^2
     },
     'antarctica': {
@@ -484,7 +491,6 @@ constants = {
         'length_boundary': 1.7e7,  # m
         'height_avg': 2000,  # m
         'volume_overhang': 2.6e16,  # m^3
-        'T_c': -10.0,  # °C
         'area_ocean': 3.6e14  # m^2
     },
     'glacier': {
